@@ -78,24 +78,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isAccountsCenterTarget: StateFlow<Boolean> = _isAccountsCenterTarget.asStateFlow()
 
     // Automation Stop Control: true = stop at name/username, false = do not stop, auto proceed
-    private val automationStopPrefs = application.getSharedPreferences("automation_stop_prefs", Context.MODE_PRIVATE)
-    private val _isAutomationStopEnabled = MutableStateFlow(automationStopPrefs.getBoolean("is_stop_enabled", true))
+    private val _isAutomationStopEnabled = MutableStateFlow(true)
     val isAutomationStopEnabled: StateFlow<Boolean> = _isAutomationStopEnabled.asStateFlow()
-
-    private val _showAutomationControlDialog = MutableStateFlow(false)
-    val showAutomationControlDialog: StateFlow<Boolean> = _showAutomationControlDialog.asStateFlow()
-
-    fun openAutomationControlDialog() {
-        _showAutomationControlDialog.value = true
-    }
-
-    fun closeAutomationControlDialog() {
-        _showAutomationControlDialog.value = false
-    }
 
     fun toggleAutomationStop() {
         _isAutomationStopEnabled.value = !_isAutomationStopEnabled.value
-        automationStopPrefs.edit().putBoolean("is_stop_enabled", _isAutomationStopEnabled.value).apply()
         setProfileBanner(if (_isAutomationStopEnabled.value) "⚙️ অটোমেশন কন্ট্রোল: অন (নামের এখানে থামবে)" else "⚙️ অটোমেশন কন্ট্রোল: অফ (কোনো স্থানে থামবে না, স্বয়ংক্রিয়ভাবে চলবে)")
     }
 
@@ -352,7 +339,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val browserCanGoBack = MutableStateFlow(false)
     val browserCanGoForward = MutableStateFlow(false)
     private var rememberedUsernameForRetry: String? = null
-    private var isTabsRestored = false
 
     init {
         val prefs = getApplication<android.app.Application>().getSharedPreferences("AutomationOffsetPrefs", android.content.Context.MODE_PRIVATE)
@@ -371,7 +357,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             browserUrl.collect { url ->
-                if (!isTabsRestored) return@collect
                 val currentTabs = _openTabs.value.toMutableList()
                 val activeId = _activeTabId.value
                 val index = currentTabs.indexOfFirst { it.tabId == activeId }
@@ -385,7 +370,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             metaBrowserUrl.collect { url ->
-                if (!isTabsRestored) return@collect
                 val currentTabs = _metaOpenTabs.value.toMutableList()
                 val activeId = _metaActiveTabId.value
                 val index = currentTabs.indexOfFirst { it.tabId == activeId }
@@ -399,7 +383,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             pureMetaBrowserUrl.collect { url ->
-                if (!isTabsRestored) return@collect
                 val currentTabs = _pureMetaOpenTabs.value.toMutableList()
                 val activeId = _pureMetaActiveTabId.value
                 val index = currentTabs.indexOfFirst { it.tabId == activeId }
@@ -416,44 +399,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repository.seedPreloadedAccountsIfNeeded()
             _hasSharedPassword.value = repository.hasSharedPassword()
 
-            // 1. Restore TWO_FA tabs
-            val (twoFaTabs, activeTwoFaId) = repository.getPersistedBrowserTabs("TWO_FA")
-            if (twoFaTabs.isNotEmpty()) {
-                _twoFaOpenTabs.value = twoFaTabs
-                val newActiveId = activeTwoFaId ?: twoFaTabs.first().tabId
-                _twoFaActiveTabId.value = newActiveId
-                val activeTab = twoFaTabs.find { it.tabId == newActiveId }
-                if (activeTab != null && activeTab.tabCookies.isNotBlank()) {
-                    val parts = activeTab.tabCookies.split(";;")
-                    if (parts.isNotEmpty() && parts[0].isNotBlank()) {
-                        twoFaInstagramEngine.pendingSessionToRestore = parts[0]
-                        twoFaInstagramEngine.restoreGenericSessionSnapshot("https://www.instagram.com", parts[0], reloadBrowser = false)
-                    }
-                    if (parts.size > 1 && parts[1].isNotBlank()) {
-                        twoFaMetaEngine.pendingSessionToRestore = parts[1]
-                        twoFaMetaEngine.restoreGenericSessionSnapshot("https://accountscenter.meta.com", parts[1], reloadBrowser = false)
-                    }
-                }
-            } else {
-                repository.saveTwoFaBrowserTabs(_twoFaOpenTabs.value, _twoFaActiveTabId.value)
-            }
-
-            // 2. Restore COOKIES tabs
-            val (cookiesTabs, activeCookiesId) = repository.getPersistedBrowserTabs("COOKIES")
-            if (cookiesTabs.isNotEmpty()) {
-                _cookiesOpenTabs.value = cookiesTabs
-                val newActiveId = activeCookiesId ?: cookiesTabs.first().tabId
-                _cookiesActiveTabId.value = newActiveId
-                val activeTab = cookiesTabs.find { it.tabId == newActiveId }
-                if (activeTab != null && activeTab.tabCookies.isNotBlank()) {
-                    engine.pendingSessionToRestore = activeTab.tabCookies
-                    engine.restoreGenericSessionSnapshot("https://www.instagram.com", activeTab.tabCookies, reloadBrowser = false)
-                }
-            } else {
-                repository.saveCookiesBrowserTabs(_cookiesOpenTabs.value, _cookiesActiveTabId.value)
-            }
-
-            // 3. Restore IG tabs
+            // 1. Restore IG tabs
             val (igTabs, activeIgId) = repository.getPersistedBrowserTabs("IG")
             if (igTabs.isNotEmpty()) {
                 _openTabs.value = igTabs
@@ -468,7 +414,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 repository.saveBrowserTabs(_openTabs.value, _activeTabId.value, "IG")
             }
 
-            // 4. Restore MUSE tabs
+            // 2. Restore MUSE tabs
             val (museTabs, activeMuseId) = repository.getPersistedBrowserTabs("MUSE")
             if (museTabs.isNotEmpty()) {
                 _metaOpenTabs.value = museTabs
@@ -483,7 +429,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 repository.saveBrowserTabs(_metaOpenTabs.value, _metaActiveTabId.value, "MUSE")
             }
 
-            // 5. Restore PURE META tabs (Meta 1, Meta 2, Meta 3...)
+            // 3. Restore PURE META tabs (Meta 1, Meta 2, Meta 3...)
             val (pureMetaTabs, activeMetaId) = repository.getPersistedBrowserTabs("PURE_META")
             if (pureMetaTabs.isNotEmpty()) {
                 _pureMetaOpenTabs.value = pureMetaTabs
@@ -497,8 +443,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 repository.savePureMetaBrowserTabs(_pureMetaOpenTabs.value, _pureMetaActiveTabId.value)
             }
-
-            isTabsRestored = true
         }
 
         viewModelScope.launch {
@@ -923,29 +867,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.saveBrowserTabs(_openTabs.value, _activeTabId.value)
         }
-    }
-
-    fun persistTwoFaTabsState() {
-        viewModelScope.launch {
-            repository.saveTwoFaBrowserTabs(_twoFaOpenTabs.value, _twoFaActiveTabId.value)
-        }
-    }
-
-    fun persistCookiesTabsState() {
-        viewModelScope.launch {
-            repository.saveCookiesBrowserTabs(_cookiesOpenTabs.value, _cookiesActiveTabId.value)
-        }
-    }
-
-    fun saveAllActiveTabs() {
-        saveActiveTabCookies()
-        saveTwoFaActiveTabCookies()
-        saveCookiesActiveTabCookies()
-        persistTabsState()
-        persistTwoFaTabsState()
-        persistCookiesTabsState()
-        persistMetaTabsState()
-        persistPureMetaTabsState()
     }
 
     private fun saveActiveTabCookies() {
@@ -1511,40 +1432,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // If step requires manual user pause
                 if (step.type == StepActionType.PAUSE_USER_INPUT || step.requiresUserInput) {
                     if (!_isAutomationStopEnabled.value) {
-                        val isNameStep = step.selector.contains("name", ignoreCase = true) || 
-                                         (step.description.contains("name", ignoreCase = true) && !step.description.contains("username", ignoreCase = true))
-                        val isUsernameStep = step.selector.contains("username", ignoreCase = true) || 
-                                             step.description.contains("username", ignoreCase = true)
-
-                        if (isNameStep) {
-                            setProfileBanner("⚡ অটোমেশন কন্ট্রোল (OFF): নামের পেজে Next বাটনে ক্লিক হচ্ছে...")
-                            engine.clickNameNextDirectly()
-                            setProfileBanner("⏳ ২ সেকেন্ড অপেক্ষা করা হচ্ছে (ইউজারনেম পেজ লোড হচ্ছে)...")
-                            delay(2000L)
-                            setProfileBanner("⚡ ইউজারনেমে নিচে Next বাটনে ক্লিক হচ্ছে...")
-                            var userClicked = engine.clickUsernameNextDirectly()
-                            if (!userClicked) {
-                                delay(1200L)
-                                engine.clickUsernameNextDirectly()
-                            }
-                            delay(1500L)
-                        } else if (isUsernameStep) {
-                            setProfileBanner("⏳ ২ সেকেন্ড অপেক্ষা করা হচ্ছে (ইউজারনেম পেজ লোড হচ্ছে)...")
-                            delay(2000L)
-                            setProfileBanner("⚡ ইউজারনেমে নিচে Next বাটনে ক্লিক হচ্ছে...")
-                            var userClicked = engine.clickUsernameNextDirectly()
-                            if (!userClicked) {
-                                delay(1200L)
-                                engine.clickUsernameNextDirectly()
-                            }
-                            delay(1500L)
-                        } else {
-                            setProfileBanner("⚡ অটোমেশন কন্ট্রোল (OFF): কোনো স্থানে না থেমে স্বয়ংক্রিয়ভাবে এগিয়ে যাচ্ছি...")
-                            engine.clickNameNextDirectly()
-                            delay(2000L)
-                            engine.clickUsernameNextDirectly()
-                            delay(1000L)
-                        }
+                        setProfileBanner("⚡ অটোমেশন কন্ট্রোল অফ: কোনো স্থানে না থেমে স্বয়ংক্রিয়ভাবে এগিয়ে যাচ্ছি...")
+                        delay(500L)
                         continue
                     }
                     val isNamePause = step.selector.contains("name", ignoreCase = true) || step.description.contains("name", ignoreCase = true) && !step.description.contains("username", ignoreCase = true)
@@ -2098,7 +1987,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // 2. Update active tab ID
         _pureMetaActiveTabId.value = tabId
-        persistPureMetaTabsState()
         val targetTab = _pureMetaOpenTabs.value.find { it.tabId == tabId } ?: return
 
         // 3. Sync account selection if tab is linked to an account
@@ -2873,7 +2761,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         currentList.add(newTab)
         _twoFaOpenTabs.value = currentList
         _twoFaActiveTabId.value = nextId
-        persistTwoFaTabsState()
 
         // Wipe session for fresh isolated new tab
         android.webkit.CookieManager.getInstance().removeAllCookies {
@@ -2890,7 +2777,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         saveTwoFaActiveTabCookies()
         _twoFaActiveTabId.value = tabId
-        persistTwoFaTabsState()
 
         val targetTab = _twoFaOpenTabs.value.find { it.tabId == tabId } ?: return
 
@@ -2949,7 +2835,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         _twoFaOpenTabs.value = reorderedList
         _twoFaActiveTabId.value = newActiveTabId
-        persistTwoFaTabsState()
 
         // Restore target tab
         val activeTab = reorderedList.find { it.tabId == newActiveTabId }
@@ -2977,7 +2862,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (tab.tabId == activeId) tab.copy(tabCookies = combined) else tab
         }
         _twoFaOpenTabs.value = updated
-        persistTwoFaTabsState()
     }
 
     fun clearTwoFaActiveTabData() {
@@ -2995,7 +2879,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (tab.tabId == _twoFaActiveTabId.value) tab.copy(tabCookies = "") else tab
             }
             _twoFaOpenTabs.value = updated
-            persistTwoFaTabsState()
             setProfileBanner("✓ $tabTitle এর সকল ডাটা ও কুকিজ ক্লিয়ার করা হয়েছে!")
         }
     }
@@ -3044,7 +2927,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         currentList.add(newTab)
         _cookiesOpenTabs.value = currentList
         _cookiesActiveTabId.value = nextId
-        persistCookiesTabsState()
 
         android.webkit.CookieManager.getInstance().removeAllCookies {
             android.webkit.CookieManager.getInstance().flush()
@@ -3059,7 +2941,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         saveCookiesActiveTabCookies()
         _cookiesActiveTabId.value = tabId
-        persistCookiesTabsState()
 
         val targetTab = _cookiesOpenTabs.value.find { it.tabId == tabId } ?: return
 
@@ -3106,7 +2987,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         _cookiesOpenTabs.value = reorderedList
         _cookiesActiveTabId.value = newActiveTabId
-        persistCookiesTabsState()
 
         val activeTab = reorderedList.find { it.tabId == newActiveTabId }
         if (activeTab != null && activeTab.tabCookies.isNotBlank()) {
@@ -3124,7 +3004,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (tab.tabId == activeId) tab.copy(tabCookies = cookies) else tab
         }
         _cookiesOpenTabs.value = updated
-        persistCookiesTabsState()
     }
 
     fun clearCookiesActiveTabData() {
@@ -3141,7 +3020,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (tab.tabId == _cookiesActiveTabId.value) tab.copy(tabCookies = "") else tab
             }
             _cookiesOpenTabs.value = updated
-            persistCookiesTabsState()
             setProfileBanner("✓ Cookies $tabTitle এর সকল ডাটা ও কুকিজ ক্লিয়ার করা হয়েছে!")
         }
     }
@@ -3201,24 +3079,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             else -> engine
         }
         if (_isAccountsCenterTarget.value) {
-            // 1st click: Navigate to Accounts Center profiles page and automatically click Instagram ID & navigate to username/name page!
+            // 1st click: Navigate to Accounts Center profiles page and automatically click Instagram ID & navigate to username URL!
             _isAccountsCenterTarget.value = false
             targetEngine.loadUrl("https://accountscenter.instagram.com/profiles/?entrypoint=fb_account_center")
             setProfileBanner("⚡ Accounts Center এ যাওয়া হচ্ছে, Instagram আইডিতে অটো ক্লিক হবে...")
             autoMoveJob?.cancel()
             autoMoveJob = viewModelScope.launch {
-                for (i in 1..10) {
-                    delay(1500L)
-                    var done = false
-                    targetEngine.injectAutoClickInstagramProfileAndNavigateToUsername { initialRes ->
-                        if (initialRes.contains("clicked_name_row") || initialRes.contains("clicked_sublink_name") || initialRes.contains("already_at_username") || initialRes.contains("clicked_instagram_profile") || initialRes.contains("clicked_profile_link")) {
-                            setProfileBanner("✓ সফলভাবে প্রোফাইল ও নাম পেইজে প্রবেশ করা হয়েছে!")
-                            done = true
-                        } else if (initialRes.contains("clicked") || initialRes.contains("navigated")) {
-                            setProfileBanner("✓ Instagram আইডিতে ক্লিক সফল হয়েছে!")
+                delay(2200L)
+                targetEngine.injectAutoClickInstagramProfileAndNavigateToUsername { initialRes ->
+                    viewModelScope.launch {
+                        for (i in 1..8) {
+                            delay(1000L)
+                            targetEngine.injectAutoClickInstagramProfileAndNavigateToUsername { checkRes ->
+                                if (checkRes.contains("navigated") || checkRes.contains("already_at_username")) {
+                                    setProfileBanner("✓ Instagram আইডিতে ক্লিক করে সরাসরি ইউজারনেম পেজে প্রবেশ করা হয়েছে!")
+                                }
+                            }
                         }
                     }
-                    if (done) break
                 }
             }
         } else {
@@ -4048,10 +3926,5 @@ interface OneSecMailApiService {
         val steps = _selectedAutomationSteps.value
         return "Name: ${workflow.name}\nDescription: ${workflow.description}\nSteps:\n" +
                steps.joinToString("\n") { "${it.stepOrder}. ${it.type}: ${it.description} (Selector: ${it.selector})" }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        saveAllActiveTabs()
     }
 }

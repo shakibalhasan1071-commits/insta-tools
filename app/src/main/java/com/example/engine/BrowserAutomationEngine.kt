@@ -1916,99 +1916,30 @@ class BrowserAutomationEngine(
                         } catch(e){}
                     }
 
-                    function triggerReactClick(el) {
-                        if (!el) return false;
-                        try {
-                            for (var k in el) {
-                                if (k.startsWith('__reactProps') || k.startsWith('__reactEventHandlers') || k.startsWith('__reactFiber')) {
-                                    var p = el[k];
-                                    if (p) {
-                                        if (typeof p.onClick === 'function') { p.onClick({ preventDefault: function(){}, stopPropagation: function(){} }); return true; }
-                                        if (typeof p.onPress === 'function') { p.onPress({ preventDefault: function(){}, stopPropagation: function(){} }); return true; }
-                                        if (p.memoizedProps) {
-                                            if (typeof p.memoizedProps.onClick === 'function') { p.memoizedProps.onClick({ preventDefault: function(){}, stopPropagation: function(){} }); return true; }
-                                            if (typeof p.memoizedProps.onPress === 'function') { p.memoizedProps.onPress({ preventDefault: function(){}, stopPropagation: function(){} }); return true; }
-                                        }
-                                    }
-                                }
-                            }
-                        } catch(e) {}
-                        return false;
-                    }
-
                     function simulateTap(el) {
                         if (!el) return;
                         try {
-                            try { el.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e){ el.scrollIntoView(); }
-                            try { el.focus(); } catch(e){}
-
                             var rect = el.getBoundingClientRect();
+                            // Target upper/center part of the row card to avoid hitting bottom padding or buttons below
                             var x = rect.left + rect.width / 2;
-                            var y = rect.top + Math.min(rect.height / 2, 28);
+                            var y = rect.top + Math.min(rect.height / 2, 24);
                             showVisualClickIndicator(x, y);
-
-                            var opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, screenX: x, screenY: y, view: window };
-
-                            try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch(e){}
-
-                            try {
-                                if (typeof Touch === 'function') {
-                                    var touchObj = new Touch({
-                                        identifier: Date.now(),
-                                        target: el,
-                                        clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y
-                                    });
-                                    el.dispatchEvent(new TouchEvent('touchstart', {
-                                        bubbles: true, cancelable: true, view: window,
-                                        touches: [touchObj], targetTouches: [touchObj], changedTouches: [touchObj]
-                                    }));
-                                }
-                            } catch(e){}
-
-                            try { el.dispatchEvent(new MouseEvent('mousedown', opts)); } catch(e){}
-                            try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch(e){}
-                            try { el.dispatchEvent(new MouseEvent('mouseup', opts)); } catch(e){}
-
-                            try {
-                                if (typeof Touch === 'function') {
-                                    var touchObjEnd = new Touch({
-                                        identifier: Date.now(),
-                                        target: el,
-                                        clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y
-                                    });
-                                    el.dispatchEvent(new TouchEvent('touchend', {
-                                        bubbles: true, cancelable: true, view: window,
-                                        touches: [], targetTouches: [], changedTouches: [touchObjEnd]
-                                    }));
-                                }
-                            } catch(e){}
-
-                            try { el.dispatchEvent(new MouseEvent('click', opts)); } catch(e){}
-                            try { el.click(); } catch(e){}
-                            triggerReactClick(el);
-
-                            // Also click the element directly under the coordinates
-                            var topEl = document.elementFromPoint(x, y);
-                            if (topEl && topEl !== el) {
-                                try { topEl.dispatchEvent(new MouseEvent('click', opts)); } catch(e){}
-                                try { topEl.click(); } catch(e){}
-                                triggerReactClick(topEl);
-                            }
-
-                            // Trigger real Android native touch input through the JavaScript bridge
-                            try {
-                                if (window.IGAutomationBridge && window.IGAutomationBridge.triggerNativeAndroidTouch) {
-                                    window.IGAutomationBridge.triggerNativeAndroidTouch(x, y);
-                                }
-                            } catch(e){}
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            el.focus();
+                            el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true }));
+                            el.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true }));
+                            el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                            el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                            el.click();
+                            el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
                         } catch(e) {
                             try { el.click(); } catch(e2){}
                         }
                     }
 
-                    // 1. If already at username or name editing URL, focus input
+                    // 1. If already at username URL, ensure input stays focused and keyboard open
                     var curUrl = window.location.href || "";
-                    if (curUrl.includes("/username/") || curUrl.includes("/name/")) {
+                    if (curUrl.includes("/username/")) {
                         var inputs = Array.from(document.querySelectorAll("input[type='text'], input:not([type='password']):not([type='hidden'])"));
                         var targetInput = inputs.find(function(i) {
                             var p = (i.placeholder || '').toLowerCase();
@@ -2021,46 +1952,25 @@ class BrowserAutomationEngine(
                         return "already_at_username: " + curUrl;
                     }
 
-                    // 2. If we are on a specific profile detail page (e.g. /profiles/12345/), click Name or Username row naturally!
-                    var profileMatch = curUrl.match(/\/profiles\/(\d+)\/?$/i);
-                    if (profileMatch && profileMatch[1]) {
-                        var subLinks = Array.from(document.querySelectorAll("a[href*='/name/'], a[href*='/username/']"));
-                        if (subLinks.length > 0) {
-                            simulateTap(subLinks[0]);
-                            try { subLinks[0].click(); } catch(e){}
-                            if (subLinks[0].href) {
-                                window.location.href = subLinks[0].href;
-                            }
-                            return "clicked_sublink_name";
-                        }
-
-                        var rows = Array.from(document.querySelectorAll("div[role='button'], a, div.x1i10hfl, div[tabindex='0'], li, span"));
-                        var nameRow = rows.find(function(el) {
-                            var t = (el.innerText || el.textContent || "").trim().toLowerCase();
-                            return t.includes("username") || t.includes("name") || t.includes("নাম") || t.includes("ইউজারনেম");
-                        });
-                        if (nameRow) {
-                            simulateTap(nameRow);
-                            try { nameRow.click(); } catch(e){}
-                            var aTag = nameRow.closest('a') || nameRow.querySelector('a');
-                            if (aTag && aTag.href) {
-                                window.location.href = aTag.href;
-                            }
-                            return "clicked_name_row";
-                        }
+                    // 2. Check if current URL already has the numeric profile ID: e.g. /profiles/178414.../
+                    var curProfileMatch = curUrl.match(/\/profiles\/(\d+)/i);
+                    if (curProfileMatch && curProfileMatch[1]) {
+                        var directUrl = "https://accountscenter.instagram.com/profiles/" + curProfileMatch[1] + "/username/?entrypoint=fb_account_center";
+                        window.location.href = directUrl;
+                        return "navigated_from_url: " + directUrl;
                     }
 
-                    // 3. Check if any link with /profiles/<ID>/ already exists in DOM
-                    var links = Array.from(document.querySelectorAll("a[href*='/profiles/']"));
+                    // 3. Check if any link with /profiles/<ID>/ or /username/ already exists in DOM
+                    var links = Array.from(document.querySelectorAll("a[href*='/profiles/'], a[href*='/username/']"));
                     for (var i = 0; i < links.length; i++) {
                         var h = links[i].href || links[i].getAttribute('href') || "";
                         var pm = h.match(/\/profiles\/(\d+)/i);
                         if (pm && pm[1]) {
                             var isIg = (links[i].innerText || links[i].textContent || h).toLowerCase().includes("instagram") || links.length === 1;
                             if (isIg || links.length === 1) {
-                                simulateTap(links[i]);
-                                try { links[i].click(); } catch(e){}
-                                return "clicked_profile_link: " + h;
+                                var targetUsernameUrl = "https://accountscenter.instagram.com/profiles/" + pm[1] + "/username/?entrypoint=fb_account_center";
+                                window.location.href = targetUsernameUrl;
+                                return "navigated_from_link: " + targetUsernameUrl;
                             }
                         }
                     }
@@ -2073,8 +1983,9 @@ class BrowserAutomationEngine(
                     });
                     if (okBtn) { simulateTap(okBtn); }
 
-                    // 5. Find the exact Instagram Profile card and click it
+                    // 5. Find the exact Instagram Profile card and click its UPPER area
                     var igProfileCard = null;
+
                     var igElements = Array.from(document.querySelectorAll("div, span, h1, h2, h3, h4, p, a, [role='button']")).filter(function(el) {
                         var t = (el.innerText || el.textContent || "").trim().toLowerCase();
                         var a = (el.getAttribute('aria-label') || "").trim().toLowerCase();
@@ -2082,7 +1993,7 @@ class BrowserAutomationEngine(
                     });
 
                     for (var j = 0; j < igElements.length; j++) {
-                        var candidate = igElements[j].closest("div[role='button'], a[href*='profiles'], div[tabindex='0'], li, div.x1i10hfl, div.xjbqb8w") || igElements[j];
+                        var candidate = igElements[j].closest("div[role='button'], a[href*='profiles'], div[tabindex='0'], li, div.x1i10hfl") || igElements[j];
                         if (candidate && candidate.offsetHeight > 20 && candidate.offsetWidth > 40) {
                             var textContent = (candidate.innerText || candidate.textContent || "").toLowerCase();
                             if (!textContent.includes("add accounts")) {
@@ -2093,7 +2004,7 @@ class BrowserAutomationEngine(
                     }
 
                     if (!igProfileCard) {
-                        var profileRows = Array.from(document.querySelectorAll("div[role='button'], a[href*='profiles'], div[tabindex='0'], div.x1i10hfl")).filter(function(el) {
+                        var profileRows = Array.from(document.querySelectorAll("div[role='button'], a[href*='profiles'], div[tabindex='0']")).filter(function(el) {
                             var t = (el.innerText || el.textContent || "").trim().toLowerCase();
                             return !t.includes("add accounts") && !t.includes("settings") && el.offsetHeight > 30;
                         });
@@ -2102,18 +2013,80 @@ class BrowserAutomationEngine(
                         }
                     }
 
+                    var actionTaken = "";
                     if (igProfileCard) {
                         simulateTap(igProfileCard);
-                        var innerClickable = igProfileCard.querySelector("div[role='button'], a, div.x1i10hfl, div[tabindex='0']");
-                        if (innerClickable && innerClickable !== igProfileCard) {
-                            simulateTap(innerClickable);
-                            try { innerClickable.click(); } catch(e){}
-                        }
-                        try { igProfileCard.click(); } catch(e){}
-                        return "clicked_instagram_profile";
+                        actionTaken = "clicked_instagram_profile";
                     }
 
-                    return "searching";
+                    // 6. Install live watcher that continuously intercepts URL / history changes and redirects to /username/
+                    if (!window.__ig_nav_to_username_installed) {
+                        window.__ig_nav_to_username_installed = true;
+
+                        function checkAndRedirect() {
+                            var url = window.location.href || "";
+                            if (url.includes("/username/")) {
+                                var inputs = Array.from(document.querySelectorAll("input[type='text'], input:not([type='password']):not([type='hidden'])"));
+                                var targetInput = inputs.find(function(i) {
+                                    var p = (i.placeholder || '').toLowerCase();
+                                    var l = (i.getAttribute('aria-label') || '').toLowerCase();
+                                    return p.includes('name') || l.includes('name') || i.offsetParent !== null;
+                                }) || inputs[0];
+                                if (targetInput) {
+                                    targetInput.focus();
+                                }
+                                return true;
+                            }
+
+                            var m = url.match(/\/profiles\/(\d+)/i);
+                            if (m && m[1]) {
+                                window.location.href = "https://accountscenter.instagram.com/profiles/" + m[1] + "/username/?entrypoint=fb_account_center";
+                                return true;
+                            }
+
+                            var userBtns = Array.from(document.querySelectorAll("button, [role='button'], a, div, span"));
+                            var uBtn = userBtns.find(function(b) {
+                                var txt = (b.innerText || b.textContent || "").trim().toLowerCase();
+                                return txt === "username" || txt === "ইউজারনেম" || (b.getAttribute('href') || "").includes("/username/");
+                            });
+                            if (uBtn) {
+                                var linkHref = uBtn.getAttribute('href') || uBtn.href || "";
+                                if (linkHref.includes("/profiles/")) {
+                                    var matchId = linkHref.match(/\/profiles\/(\d+)/i);
+                                    if (matchId && matchId[1]) {
+                                        window.location.href = "https://accountscenter.instagram.com/profiles/" + matchId[1] + "/username/?entrypoint=fb_account_center";
+                                        return true;
+                                    }
+                                }
+                                simulateTap(uBtn);
+                                return true;
+                            }
+                            return false;
+                        }
+
+                        var origPushState = history.pushState;
+                        history.pushState = function() {
+                            origPushState.apply(this, arguments);
+                            setTimeout(checkAndRedirect, 50);
+                        };
+                        var origReplaceState = history.replaceState;
+                        history.replaceState = function() {
+                            origReplaceState.apply(this, arguments);
+                            setTimeout(checkAndRedirect, 50);
+                        };
+
+                        var watchInterval = setInterval(function() {
+                            if (checkAndRedirect()) {
+                                clearInterval(watchInterval);
+                            }
+                        }, 200);
+
+                        setTimeout(function() {
+                            clearInterval(watchInterval);
+                        }, 15000);
+                    }
+
+                    return actionTaken.length > 0 ? actionTaken : "searching";
                 } catch(e) {
                     return "error: " + e.message;
                 }
@@ -3623,71 +3596,17 @@ class BrowserAutomationEngine(
 
                 function cleanClick(el) {
                     if (!el) return;
-                    var target = el.closest('button, [role="button"], a, div.x1i10hfl, div.xjbqb8w, input[type="radio"], input[type="checkbox"], [tabindex]') || el;
+                    var target = el.closest('button, [role="button"], a, input[type="radio"], input[type="checkbox"], [tabindex]') || el;
                     try {
-                        try { target.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e){}
-                        try { target.focus(); } catch(e){}
-
                         var rect = target.getBoundingClientRect();
-                        var x = rect.left + rect.width / 2;
-                        var y = rect.top + Math.min(rect.height / 2, 28);
                         if (rect.width > 0 && rect.height > 0) {
-                            showVisualClickIndicator(x, y);
+                            showVisualClickIndicator(rect.left + rect.width / 2, rect.top + rect.height / 2);
                         }
-
-                        var opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, screenX: x, screenY: y, view: window };
-                        try { target.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch(e){}
-
-                        try {
-                            if (typeof Touch === 'function') {
-                                var touchObj = new Touch({
-                                    identifier: Date.now(),
-                                    target: target,
-                                    clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y
-                                });
-                                target.dispatchEvent(new TouchEvent('touchstart', {
-                                    bubbles: true, cancelable: true, view: window,
-                                    touches: [touchObj], targetTouches: [touchObj], changedTouches: [touchObj]
-                                }));
-                            }
-                        } catch(e){}
-
-                        try { target.dispatchEvent(new MouseEvent('mousedown', opts)); } catch(e){}
-                        try { target.dispatchEvent(new PointerEvent('pointerup', opts)); } catch(e){}
-                        try { target.dispatchEvent(new MouseEvent('mouseup', opts)); } catch(e){}
-
-                        try {
-                            if (typeof Touch === 'function') {
-                                var touchObjEnd = new Touch({
-                                    identifier: Date.now(),
-                                    target: target,
-                                    clientX: x, clientY: y, screenX: x, screenY: y, pageX: x, pageY: y
-                                });
-                                target.dispatchEvent(new TouchEvent('touchend', {
-                                    bubbles: true, cancelable: true, view: window,
-                                    touches: [], targetTouches: [], changedTouches: [touchObjEnd]
-                                }));
-                            }
-                        } catch(e){}
-
-                        try { target.dispatchEvent(new MouseEvent('click', opts)); } catch(e){}
-                        try { target.click(); } catch(e){}
-
-                        triggerReactHandler(target);
-
-                        var topEl = document.elementFromPoint(x, y);
-                        if (topEl && topEl !== target) {
-                            try { topEl.dispatchEvent(new MouseEvent('click', opts)); } catch(e){}
-                            try { topEl.click(); } catch(e){}
-                            triggerReactHandler(topEl);
-                        }
-
-                        if (window.IGAutomationBridge && window.IGAutomationBridge.triggerNativeAndroidTouch) {
-                            window.IGAutomationBridge.triggerNativeAndroidTouch(x, y);
-                        }
-                    } catch(e) {
-                        try { target.click(); } catch(e2){}
-                    }
+                    } catch(e) {}
+                    ['mousedown', 'mouseup', 'click'].forEach(function(type) {
+                        try { target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); } catch(e){}
+                    });
+                    try { target.click(); } catch(e) {}
                 }
 
                 function base32ToUint8Array(base32) {
@@ -4287,58 +4206,30 @@ class BrowserAutomationEngine(
                         """ else ""}
 
                         ${if (isUsernameNext) """
-                        var allClickables = Array.from(document.querySelectorAll("button, [role='button'], div[role='button'], [type='submit'], div, span, a"));
-                        
-                        var bodyText = (document.body ? document.body.innerText : "") || "";
-                        var isUsernameScreen = bodyText.toLowerCase().includes("create a username") || 
-                                               bodyText.toLowerCase().includes("username for instagram") ||
-                                               bodyText.toLowerCase().includes("add a username");
-
-                        var matches = allClickables.filter(function(b) {
-                            var txt = (b.innerText || b.textContent || b.value || b.getAttribute('aria-label') || "").trim().toLowerCase();
-                            return txt === "next" || txt === "continue" || txt === "next " || txt === "continue " || 
-                                   txt === "ডানে" || txt === "পরবর্তী" || txt === "সেভ";
+                        var allBtns = Array.from(document.querySelectorAll("button, [role='button'], [type='submit'], div, span"));
+                        var nextCandidates = allBtns.filter(function(b) {
+                            var txt = (b.innerText || b.textContent || "").trim().toLowerCase();
+                            return txt === "next" || txt === "continue" || txt === "next " || txt === "continue " || txt === "ডানে" || txt === "সেভ";
                         });
-
-                        if (matches.length > 0) {
-                            var visibleMatches = matches.filter(function(m) {
-                                var rect = m.getBoundingClientRect();
-                                return rect.width > 20 && rect.height > 15;
-                            });
-                            var targetList = visibleMatches.length > 0 ? visibleMatches : matches;
-                            targetList.sort(function(a, b) {
-                                var scoreA = (a.tagName === "BUTTON" || a.getAttribute("role") === "button") ? 10 : 0;
-                                var scoreB = (b.tagName === "BUTTON" || b.getAttribute("role") === "button") ? 10 : 0;
-                                if (a.tagName === "BUTTON") scoreA += 5;
-                                if (b.tagName === "BUTTON") scoreB += 5;
-                                var rectA = a.getBoundingClientRect();
-                                var rectB = b.getBoundingClientRect();
-                                if (rectA.top > 120) scoreA += 5;
-                                if (rectB.top > 120) scoreB += 5;
+                        
+                        if (nextCandidates.length > 0) {
+                            nextCandidates.sort(function(a, b) {
+                                var scoreA = (a.tagName === "BUTTON" || a.getAttribute("role") === "button") ? 2 : 0;
+                                var scoreB = (b.tagName === "BUTTON" || b.getAttribute("role") === "button") ? 2 : 0;
                                 return scoreB - scoreA;
                             });
-                            el = targetList[0];
+                            el = nextCandidates[0];
                         }
-
-                        if (!el && isUsernameScreen) {
-                            var inputs = Array.from(document.querySelectorAll("input[type='text'], input"));
-                            if (inputs.length > 0) {
-                                var inputRect = inputs[0].getBoundingClientRect();
-                                var buttonsBelow = allClickables.filter(function(b) {
-                                    var r = b.getBoundingClientRect();
-                                    return r.top > inputRect.bottom && r.height >= 25 && (b.tagName === "BUTTON" || b.getAttribute("role") === "button");
-                                });
-                                if (buttonsBelow.length > 0) {
-                                    el = buttonsBelow[0];
-                                }
-                            }
-                        }
-
+                        
                         if (!el) {
-                            el = allClickables.find(function(b) {
+                            el = allBtns.find(function(b) {
                                 var txt = (b.innerText || "").trim().toLowerCase();
-                                return (txt.indexOf("next") === 0 || txt.indexOf("continue") === 0) && (b.tagName === "BUTTON" || b.getAttribute("role") === "button");
+                                return (txt.indexOf("next") !== -1 || txt.indexOf("continue") !== -1) && b.tagName === "BUTTON";
                             });
+                        }
+                        
+                        if (!el) {
+                            el = document.querySelector("button[type='submit'], button");
                         }
                         """ else ""}
 
@@ -4681,23 +4572,20 @@ class BrowserAutomationEngine(
                             }
                             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             el.focus();
-                            
-                            var rect = el.getBoundingClientRect();
-                            var clickX = rect.left + rect.width / 2;
-                            var clickY = rect.top + rect.height / 2;
-
-                            el.dispatchEvent(new MouseEvent('mousedown', { clientX: clickX, clientY: clickY, bubbles: true, cancelable: true }));
-                            el.dispatchEvent(new MouseEvent('mouseup', { clientX: clickX, clientY: clickY, bubbles: true, cancelable: true }));
+                            el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                            el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
                             
                             // Touch event dispatch for React Native for Web
                             try {
                                 var touch = new Touch({
                                     identifier: Date.now(),
                                     target: el,
-                                    clientX: clickX,
-                                    clientY: clickY,
-                                    pageX: clickX,
-                                    pageY: clickY
+                                    clientX: 0,
+                                    clientY: 0,
+                                    screenX: 0,
+                                    screenY: 0,
+                                    pageX: 0,
+                                    pageY: 0
                                 });
                                 var touchStart = new TouchEvent('touchstart', {
                                     touches: [touch],
@@ -4728,15 +4616,7 @@ class BrowserAutomationEngine(
                             }
 
                             try { el.click(); } catch(e) {}
-                            el.dispatchEvent(new MouseEvent('click', { clientX: clickX, clientY: clickY, bubbles: true, cancelable: true }));
-
-                            try {
-                                var parentForm = el.closest('form');
-                                if (parentForm && typeof parentForm.requestSubmit === 'function') {
-                                    parentForm.requestSubmit(el);
-                                }
-                            } catch(e) {}
-
+                            el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
                             return JSON.stringify({ success: true, message: "Clicked " + (el.innerText ? el.innerText.trim().substring(0, 25) : el.tagName) });
                         }
                         return JSON.stringify({ success: false, message: "Element not found: $selector" });
@@ -6335,175 +6215,6 @@ class BrowserAutomationEngine(
     fun setClickYOffset(offsetPx: Int) {
         val script = "window.__clickYOffset = $offsetPx;"
         webView?.post { webView?.evaluateJavascript(script, null) }
-    }
-
-    suspend fun isStillOnUsernameScreen(): Boolean = suspendCancellableCoroutine { continuation ->
-        val script = """
-            (function() {
-                var bodyText = (document.body ? document.body.innerText : "") || "";
-                var lower = bodyText.toLowerCase();
-                var isCreateUsername = lower.includes("create a username") || 
-                                       lower.includes("username for instagram") || 
-                                       lower.includes("add a username");
-                var hasUsernameInput = document.querySelector("input[name='username'], input[type='text']") !== null;
-                return isCreateUsername && hasUsernameInput;
-            })();
-        """.trimIndent()
-        webView?.post {
-            webView?.evaluateJavascript(script) { res ->
-                val result = res?.trim()?.toBoolean() ?: false
-                if (continuation.isActive) {
-                    continuation.resume(result)
-                }
-            }
-        } ?: run {
-            if (continuation.isActive) continuation.resume(false)
-        }
-    }
-
-    suspend fun clickNameNextDirectly(): Boolean = suspendCancellableCoroutine { continuation ->
-        val script = """
-            (function() {
-                function findNextBtn() {
-                    var buttons = Array.from(document.querySelectorAll("button, [role='button'], div[role='button'], [type='submit'], input[type='submit'], div, span, a, [tabindex='0']"));
-                    var nextCandidates = buttons.filter(function(btn) {
-                        var txt = (btn.innerText || btn.textContent || btn.value || btn.getAttribute('aria-label') || "").trim().toLowerCase();
-                        return txt === "next" || txt === "continue" || txt === "next " || txt === "continue " || 
-                               txt === "ডানে" || txt === "পরবর্তী" || txt === "চলুন" ||
-                               (txt.indexOf("next") === 0 && txt.length <= 15) || (txt.indexOf("continue") === 0 && txt.length <= 15) || btn.type === "submit";
-                    });
-                    if (nextCandidates.length > 0) {
-                        nextCandidates.sort(function(a, b) {
-                            var scoreA = (a.tagName === "BUTTON" || a.getAttribute("role") === "button") ? 10 : 0;
-                            var scoreB = (b.tagName === "BUTTON" || b.getAttribute("role") === "button") ? 10 : 0;
-                            return scoreB - scoreA;
-                        });
-                        return nextCandidates[0];
-                    }
-                    return document.querySelector("button[type='submit'], form button");
-                }
-                var btn = findNextBtn();
-                if (!btn) return false;
-                try {
-                    window.__ig_name_advanced = true;
-                    btn.scrollIntoView({ behavior: 'instant', block: 'center' });
-                    btn.focus();
-                    var rect = btn.getBoundingClientRect();
-                    var cx = rect.left + rect.width / 2;
-                    var cy = rect.top + rect.height / 2;
-                    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function(evt) {
-                        btn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
-                    });
-                    if (typeof btn.click === 'function') btn.click();
-                    var form = btn.closest('form') || document.querySelector('form');
-                    if (form && typeof form.requestSubmit === 'function') {
-                        try { form.requestSubmit(btn); } catch(e) {}
-                    }
-                    return true;
-                } catch(e) {
-                    try { btn.click(); return true; } catch(err) { return false; }
-                }
-            })();
-        """.trimIndent()
-        webView?.post {
-            webView?.evaluateJavascript(script) { res ->
-                val result = res?.trim()?.toBoolean() ?: false
-                if (continuation.isActive) continuation.resume(result)
-            }
-        } ?: run {
-            if (continuation.isActive) continuation.resume(false)
-        }
-    }
-
-    suspend fun clickUsernameNextDirectly(): Boolean = suspendCancellableCoroutine { continuation ->
-        val script = """
-            (function() {
-                var usernameInput = document.querySelector("input[name='username'], input[type='text'], input[aria-label*='username' i], input:not([type='password']):not([type='hidden'])");
-                var inputBottom = usernameInput ? usernameInput.getBoundingClientRect().bottom : 0;
-
-                var allClickables = Array.from(document.querySelectorAll("button, [role='button'], div[role='button'], [type='submit'], input[type='submit'], div, span, a, [tabindex='0']"));
-                var matches = allClickables.filter(function(b) {
-                    var txt = (b.innerText || b.textContent || b.value || b.getAttribute('aria-label') || "").trim().toLowerCase();
-                    return txt === "next" || txt === "continue" || txt === "next " || txt === "continue " || 
-                           txt === "ডানে" || txt === "পরবর্তী" || txt === "সেভ" || txt === "save" || txt === "done" ||
-                           (txt.indexOf("next") === 0 && txt.length <= 15) || (txt.indexOf("continue") === 0 && txt.length <= 15) || b.type === "submit";
-                });
-                if (matches.length === 0) {
-                    var submitBtn = document.querySelector("button[type='submit'], form button");
-                    if (submitBtn) matches = [submitBtn];
-                }
-                if (matches.length === 0) return false;
-                
-                var visibleMatches = matches.filter(function(m) {
-                    var rect = m.getBoundingClientRect();
-                    return rect.width > 20 && rect.height > 15;
-                });
-                var targetList = visibleMatches.length > 0 ? visibleMatches : matches;
-                targetList.sort(function(a, b) {
-                    var scoreA = (a.tagName === "BUTTON" || a.getAttribute("role") === "button") ? 10 : 0;
-                    var scoreB = (b.tagName === "BUTTON" || b.getAttribute("role") === "button") ? 10 : 0;
-                    if (a.tagName === "BUTTON") scoreA += 5;
-                    if (b.tagName === "BUTTON") scoreB += 5;
-                    var rectA = a.getBoundingClientRect();
-                    var rectB = b.getBoundingClientRect();
-                    if (rectA.top >= inputBottom - 10) scoreA += 10;
-                    if (rectB.top >= inputBottom - 10) scoreB += 10;
-                    return scoreB - scoreA;
-                });
-                var el = targetList[0];
-                if (!el) return false;
-
-                try {
-                    window.__ig_user_clicked_continue = true;
-                    el.scrollIntoView({ behavior: 'instant', block: 'center' });
-                    el.focus();
-                    var rect = el.getBoundingClientRect();
-                    var clickX = rect.left + rect.width / 2;
-                    var clickY = rect.top + rect.height / 2;
-                    
-                    var touch = new Touch({
-                        identifier: Date.now(),
-                        target: el,
-                        clientX: clickX,
-                        clientY: clickY,
-                        pageX: clickX,
-                        pageY: clickY
-                    });
-                    var touchStart = new TouchEvent('touchstart', {
-                        touches: [touch], targetTouches: [touch], changedTouches: [touch], bubbles: true, cancelable: true
-                    });
-                    el.dispatchEvent(touchStart);
-                    
-                    var touchEnd = new TouchEvent('touchend', {
-                        touches: [], targetTouches: [], changedTouches: [touch], bubbles: true, cancelable: true
-                    });
-                    el.dispatchEvent(touchEnd);
-
-                    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function(evt) {
-                        el.dispatchEvent(new MouseEvent(evt, { clientX: clickX, clientY: clickY, bubbles: true, cancelable: true }));
-                    });
-                    if (typeof el.click === 'function') el.click();
-
-                    var parentForm = el.closest('form') || document.querySelector('form');
-                    if (parentForm && typeof parentForm.requestSubmit === 'function') {
-                        try { parentForm.requestSubmit(el); } catch(e) {}
-                    }
-                    return true;
-                } catch(e) {
-                    try { el.click(); return true; } catch(err) { return false; }
-                }
-            })();
-        """.trimIndent()
-        webView?.post {
-            webView?.evaluateJavascript(script) { res ->
-                val result = res?.trim()?.toBoolean() ?: false
-                if (continuation.isActive) {
-                    continuation.resume(result)
-                }
-            }
-        } ?: run {
-            if (continuation.isActive) continuation.resume(false)
-        }
     }
 
     fun setClickXOffset(offsetPx: Int) {

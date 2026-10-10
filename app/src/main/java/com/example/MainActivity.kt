@@ -27,16 +27,11 @@ import com.example.ui.components.AutomationModeSelectionDialog
 import com.example.ui.components.BottomNavBar
 import com.example.ui.components.LiveAutomationProcessBanner
 import com.example.ui.components.MetaTopControlBar
-import androidx.compose.runtime.DisposableEffect
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.ui.components.TopControlBar
 import com.example.ui.components.TwoFaSubTabBar
 import com.example.ui.components.UniversalTopControlBar
 import com.example.ui.components.VisualClickTesterOverlay
 import com.example.ui.dialogs.AccountSelectDialog
-import com.example.ui.dialogs.AutomationControlDialog
 import com.example.ui.dialogs.CookieDialog
 import com.example.ui.dialogs.EditStepDialog
 import com.example.ui.dialogs.IgAccountManagerDialog
@@ -53,32 +48,15 @@ import com.example.viewmodel.MainViewModel
 import com.example.viewmodel.TwoFaSubMode
 
 class MainActivity : ComponentActivity() {
-    private var mainViewModel: MainViewModel? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
                 val viewModel: MainViewModel = viewModel()
-                mainViewModel = viewModel
                 MainAppScreen(viewModel)
             }
         }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        try {
-            mainViewModel?.saveAllActiveTabs()
-        } catch (_: Exception) {}
-    }
-
-    override fun onStop() {
-        super.onStop()
-        try {
-            mainViewModel?.saveAllActiveTabs()
-        } catch (_: Exception) {}
     }
 }
 
@@ -130,21 +108,6 @@ fun MainAppScreen(viewModel: MainViewModel) {
 
     val isAccountsCenterTarget by viewModel.isAccountsCenterTarget.collectAsStateWithLifecycle()
     val isAutomationStopEnabled by viewModel.isAutomationStopEnabled.collectAsStateWithLifecycle()
-    val showAutomationControlDialog by viewModel.showAutomationControlDialog.collectAsStateWithLifecycle()
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                viewModel.saveAllActiveTabs()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            viewModel.saveAllActiveTabs()
-        }
-    }
 
     // Handle back button: return to 2FA tab
     BackHandler(enabled = currentTab != MainTab.TWO_FA) {
@@ -195,7 +158,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                             onToggleNav = { viewModel.toggleAccountsCenterOrInstagram() },
                             onToggleAutomation = { viewModel.toggleActiveAutomation() },
                             isAutomationStopEnabled = isAutomationStopEnabled,
-                            onToggleAutomationStop = { viewModel.openAutomationControlDialog() },
+                            onToggleAutomationStop = { viewModel.toggleAutomationStop() },
                             onClearClick = { viewModel.onClearButtonClicked() },
                             onMailClick = { viewModel.openEmailManagerDialog() },
                             onNextClick = { viewModel.nextMailAccount() },
@@ -249,9 +212,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                         onSelectAccountClick = { viewModel.openAccountSelectDialog() },
                         onStopAutomationClick = { viewModel.stopAutomation() },
                         onFirstAutomationClick = { viewModel.selectModeAndStart(com.example.data.model.AutomationMode.CURRENT) },
-                        onSecondAutomationClick = { viewModel.selectModeAndStart(com.example.data.model.AutomationMode.AUTO_USERNAME) },
-                        isAutomationStopEnabled = isAutomationStopEnabled,
-                        onAutomationControlClick = { viewModel.openAutomationControlDialog() }
+                        onSecondAutomationClick = { viewModel.selectModeAndStart(com.example.data.model.AutomationMode.AUTO_USERNAME) }
                     )
                 }
                 MainTab.META -> {
@@ -489,14 +450,6 @@ fun MainAppScreen(viewModel: MainViewModel) {
             onUpdateYOffset = { offset -> viewModel.updateClickYOffset(offset) },
             onImportConfigJson = { jsonStr -> viewModel.importConfigJson(jsonStr) },
             onDismiss = { viewModel.closeConfigExportDialog() }
-        )
-    }
-
-    if (showAutomationControlDialog) {
-        AutomationControlDialog(
-            isAutomationStopEnabled = isAutomationStopEnabled,
-            onToggleAutomationStop = { viewModel.toggleAutomationStop() },
-            onDismiss = { viewModel.closeAutomationControlDialog() }
         )
     }
 }

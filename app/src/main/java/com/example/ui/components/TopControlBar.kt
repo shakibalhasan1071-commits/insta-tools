@@ -36,7 +36,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.MaterialTheme
@@ -96,8 +96,6 @@ fun TopControlBar(
     onStopAutomationClick: () -> Unit = {},
     onFirstAutomationClick: () -> Unit = {},
     onSecondAutomationClick: () -> Unit = {},
-    isAutomationStopEnabled: Boolean = true,
-    onAutomationControlClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -161,22 +159,7 @@ fun TopControlBar(
                         .testTag("top_bar_email_button")
                 )
 
-                // 4. AUTOMATION CONTROL BUTTON (অটোমেশন কন্ট্রোল)
-                val stopControlColor = if (isAutomationStopEnabled) Color(0xFF00E676) else Color(0xFFFF9100)
-                val stopControlIcon = if (isAutomationStopEnabled) Icons.Default.Pause else Icons.Default.FastForward
-                TopCompactButton(
-                    label = if (isAutomationStopEnabled) "Auto ON" else "Auto OFF",
-                    icon = stopControlIcon,
-                    iconTint = stopControlColor,
-                    accentBorder = stopControlColor.copy(alpha = 0.6f),
-                    badgeText = if (isAutomationStopEnabled) "ON" else "OFF",
-                    onClick = onAutomationControlClick,
-                    modifier = Modifier
-                        .weight(1.05f)
-                        .testTag("top_bar_automation_control_button")
-                )
-
-                // 5. RELOAD
+                // 4. RELOAD
                 TopCompactButton(
                     label = "Reload",
                     icon = Icons.Default.Refresh,
@@ -187,7 +170,7 @@ fun TopControlBar(
                         .testTag("top_bar_reload_button")
                 )
 
-                // 6. DYNAMIC AUTOMATION DIRECT TRIGGER
+                // 5. DYNAMIC AUTOMATION DIRECT TRIGGER
                 TopDynamicAutoButton(
                     executionState = executionState,
                     queueState = queueState,
