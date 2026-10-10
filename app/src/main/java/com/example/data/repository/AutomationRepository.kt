@@ -36,6 +36,7 @@ class AutomationRepository(private val context: Context) {
     private val tabDao = db.browserTabDao()
     private val securityStore = SecurityStore(context)
     private val persistentVault = context.getSharedPreferences("ig_accounts_persistent_vault", Context.MODE_PRIVATE)
+    private val tabsPersistentVault = context.getSharedPreferences("browser_tabs_persistent_vault", Context.MODE_PRIVATE)
 
     init {
         CoroutineScope(Dispatchers.IO).launch {
@@ -240,18 +241,35 @@ class AutomationRepository(private val context: Context) {
         type: com.example.data.model.AccountType = com.example.data.model.AccountType.IG,
         source: String = "MANUAL"
     ): Int = withContext(Dispatchers.IO) {
-        val lines = rawInput.split("\n", ";")
+        val rawEntries = rawInput.split("\n", "\r", ";")
             .map { it.trim() }
             .filter { it.isNotEmpty() }
 
+        val lines = mutableListOf<String>()
+        for (entry in rawEntries) {
+            if (entry.contains(",")) {
+                val commaParts = entry.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                val emailCount = commaParts.count { it.contains("@") }
+                if (emailCount > 1) {
+                    lines.addAll(commaParts)
+                } else {
+                    lines.add(entry)
+                }
+            } else {
+                lines.add(entry)
+            }
+        }
+
         var addedCount = 0
-        val existingAccountsMap = accountDao.getAccountsByTypeList(type.name).associateBy { it.email.lowercase() }
+        val existingAccountsMap = accountDao.getAccountsByTypeList(type.name)
+            .associateBy { it.email.lowercase() }
+            .toMutableMap()
         var currentOrder = accountDao.getAccountsByTypeList(type.name).size
 
         for (line in lines) {
             var email = line
             var password = commonPassword
-            val delimiters = Regex("[:|,\\s]+")
+            val delimiters = Regex("[:|\\s]+|,(?![^@]*@)")
             if (line.contains(delimiters)) {
                 val parts = line.split(delimiters, limit = 2)
                 if (parts.size >= 2) {
@@ -273,17 +291,17 @@ class AutomationRepository(private val context: Context) {
                         accountEmail = email
                     )
                 )
-                accountDao.insertAccount(
-                    AccountEntity(
-                        email = email,
-                        password = password,
-                        profileId = profileId,
-                        displayOrder = currentOrder,
-                        isUsed = false,
-                        type = type.name,
-                        username = source
-                    )
+                val newEntity = AccountEntity(
+                    email = email,
+                    password = password,
+                    profileId = profileId,
+                    displayOrder = currentOrder,
+                    isUsed = false,
+                    type = type.name,
+                    username = source
                 )
+                accountDao.insertAccount(newEntity)
+                existingAccountsMap[email.lowercase()] = newEntity
                 addedCount++
             } else if (password.isNotBlank()) {
                 accountDao.updateAccount(existing.copy(password = password))
@@ -744,7 +762,7 @@ class AutomationRepository(private val context: Context) {
                 type = StepActionType.CLICK.name,
                 selector = "whats_your_name_next",
                 description = "8. Click 'Next' on 'What's your name?'",
-                delayMs = 600L
+                delayMs = 2000L
             ),
             AutomationStepEntity(
                 automationId = metaFlowId,
@@ -752,7 +770,7 @@ class AutomationRepository(private val context: Context) {
                 type = StepActionType.CLICK.name,
                 selector = "username_next_button",
                 description = "9. Auto Click 'Next' on Username",
-                delayMs = 1200L
+                delayMs = 2500L
             ),
             AutomationStepEntity(
                 automationId = metaFlowId,
@@ -949,21 +967,50 @@ class AutomationRepository(private val context: Context) {
         activeTabId: Int,
         tabType: String = "IG"
     ) = withContext(Dispatchers.IO) {
-        tabDao.deleteTabsByType(tabType)
-        val entities = tabs.map { tab ->
-            com.example.data.local.BrowserTabEntity(
-                tabType = tabType,
-                tabId = tab.tabId,
-                title = tab.title,
-                url = tab.url,
-                tabCookies = tab.tabCookies,
-                accountId = tab.accountId,
-                profileId = tab.profileId,
-                isMeta = tab.isMeta,
-                isActive = (tab.tabId == activeTabId)
-            )
+        if (tabs.isEmpty()) return@withContext
+        try {
+            tabDao.deleteTabsByType(tabType)
+            val entities = tabs.map { tab ->
+                com.example.data.local.BrowserTabEntity(
+                    tabType = tabType,
+                    tabId = tab.tabId,
+                    title = tab.title,
+                    url = tab.url,
+                    tabCookies = tab.tabCookies,
+                    accountId = tab.accountId,
+                    profileId = tab.profileId,
+                    isMeta = tab.isMeta,
+                    isActive = (tab.tabId == activeTabId)
+                )
+            }
+            tabDao.insertTabs(entities)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        tabDao.insertTabs(entities)
+
+        // Backup to persistent SharedPreferences
+        try {
+            val jsonArray = JSONArray()
+            tabs.forEach { tab ->
+                val obj = JSONObject().apply {
+                    put("tabId", tab.tabId)
+                    put("title", tab.title)
+                    put("url", tab.url)
+                    put("tabCookies", tab.tabCookies)
+                    put("accountId", tab.accountId ?: JSONObject.NULL)
+                    put("profileId", tab.profileId)
+                    put("isMeta", tab.isMeta)
+                    put("isActive", tab.tabId == activeTabId)
+                }
+                jsonArray.put(obj)
+            }
+            tabsPersistentVault.edit()
+                .putString("tabs_$tabType", jsonArray.toString())
+                .putInt("active_id_$tabType", activeTabId)
+                .commit()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     suspend fun saveMetaBrowserTabs(tabs: List<com.example.data.model.BrowserTabItem>, activeTabId: Int) = withContext(Dispatchers.IO) {
@@ -974,28 +1021,91 @@ class AutomationRepository(private val context: Context) {
         saveBrowserTabs(tabs, activeTabId, tabType = "PURE_META")
     }
 
+    suspend fun saveTwoFaBrowserTabs(tabs: List<com.example.data.model.BrowserTabItem>, activeTabId: Int) = withContext(Dispatchers.IO) {
+        saveBrowserTabs(tabs, activeTabId, tabType = "TWO_FA")
+    }
+
+    suspend fun saveCookiesBrowserTabs(tabs: List<com.example.data.model.BrowserTabItem>, activeTabId: Int) = withContext(Dispatchers.IO) {
+        saveBrowserTabs(tabs, activeTabId, tabType = "COOKIES")
+    }
+
     suspend fun getPersistedBrowserTabs(tabType: String = "IG"): Pair<List<com.example.data.model.BrowserTabItem>, Int?> = withContext(Dispatchers.IO) {
-        val entities = tabDao.getTabsByType(tabType)
-        if (entities.isEmpty()) {
-            return@withContext Pair(emptyList<com.example.data.model.BrowserTabItem>(), null)
+        val entities = try {
+            tabDao.getTabsByType(tabType)
+        } catch (e: Exception) {
+            emptyList()
         }
 
-        var activeId: Int? = null
-        val mapped = entities.map { entity ->
-            if (entity.isActive) {
-                activeId = entity.tabId
+        if (entities.isNotEmpty()) {
+            var activeId: Int? = null
+            val mapped = entities.map { entity ->
+                if (entity.isActive) {
+                    activeId = entity.tabId
+                }
+                com.example.data.model.BrowserTabItem(
+                    tabId = entity.tabId,
+                    title = entity.title,
+                    url = entity.url,
+                    tabCookies = entity.tabCookies,
+                    accountId = entity.accountId,
+                    profileId = entity.profileId,
+                    isMeta = entity.isMeta
+                )
             }
-            com.example.data.model.BrowserTabItem(
-                tabId = entity.tabId,
-                title = entity.title,
-                url = entity.url,
-                tabCookies = entity.tabCookies,
-                accountId = entity.accountId,
-                profileId = entity.profileId,
-                isMeta = entity.isMeta
-            )
+            return@withContext Pair(mapped, activeId)
         }
-        Pair(mapped, activeId)
+
+        // Fallback to persistent SharedPreferences
+        val jsonStr = tabsPersistentVault.getString("tabs_$tabType", null)
+        if (!jsonStr.isNullOrBlank()) {
+            try {
+                val array = JSONArray(jsonStr)
+                val fallbackTabs = mutableListOf<com.example.data.model.BrowserTabItem>()
+                val savedActiveId = tabsPersistentVault.getInt("active_id_$tabType", 1)
+                var activeId: Int? = null
+
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val tabId = obj.optInt("tabId", i + 1)
+                    val isActive = obj.optBoolean("isActive", false) || (tabId == savedActiveId)
+                    if (isActive) activeId = tabId
+                    fallbackTabs.add(
+                        com.example.data.model.BrowserTabItem(
+                            tabId = tabId,
+                            title = obj.optString("title", "Tab $tabId"),
+                            url = obj.optString("url", "https://www.instagram.com/"),
+                            tabCookies = obj.optString("tabCookies", ""),
+                            accountId = if (obj.isNull("accountId")) null else obj.optLong("accountId"),
+                            profileId = obj.optString("profileId", ""),
+                            isMeta = obj.optBoolean("isMeta", false)
+                        )
+                    )
+                }
+
+                if (fallbackTabs.isNotEmpty()) {
+                    // Re-seed Room from persistent vault
+                    val fallbackEntities = fallbackTabs.map { tab ->
+                        com.example.data.local.BrowserTabEntity(
+                            tabType = tabType,
+                            tabId = tab.tabId,
+                            title = tab.title,
+                            url = tab.url,
+                            tabCookies = tab.tabCookies,
+                            accountId = tab.accountId,
+                            profileId = tab.profileId,
+                            isMeta = tab.isMeta,
+                            isActive = (tab.tabId == (activeId ?: 1))
+                        )
+                    }
+                    tabDao.insertTabs(fallbackEntities)
+                    return@withContext Pair(fallbackTabs, activeId ?: savedActiveId)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        Pair(emptyList(), null)
     }
 
     companion object {
